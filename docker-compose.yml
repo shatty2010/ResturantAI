@@ -1,0 +1,79 @@
+name: restaurantai
+
+x-app-environment: &app-environment
+  ConnectionStrings__Restaurant: Host=postgres;Database=restaurant;Username=restaurant;Password=${POSTGRES_PASSWORD:-restaurant_dev}
+  RabbitMQ__Host: rabbitmq
+  RabbitMQ__Username: restaurant
+  RabbitMQ__Password: ${RABBITMQ_PASSWORD:-restaurant_dev}
+  ASPNETCORE_HTTP_PORTS: 8080
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: restaurant
+      POSTGRES_USER: restaurant
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-restaurant_dev}
+    ports: ["127.0.0.1:${POSTGRES_PORT:-55432}:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U restaurant -d restaurant"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: restaurant
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-restaurant_dev}
+    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
+    volumes: ["rabbitmq-data:/var/lib/rabbitmq"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  order-api:
+    build:
+      context: .
+      args:
+        PROJECT: RestaurantAI.OrderApi
+    environment: *app-environment
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    stop_grace_period: 35s
+    restart: unless-stopped
+
+  kitchen-worker:
+    build:
+      context: .
+      args:
+        PROJECT: RestaurantAI.KitchenWorker
+    environment:
+      <<: *app-environment
+      Kitchen__PreparationSeconds: ${KITCHEN_PREPARATION_SECONDS:-5}
+    depends_on:
+      order-api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8080/health/ready && curl --fail --silent http://localhost:8080/health/consumer"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    stop_grace_period: 35s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  rabbitmq-data:

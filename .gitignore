@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+.vs/
+TestResults/
+.env
+artifacts/
+docker-build.log
+docker/certs/*.crt
